@@ -1,0 +1,14 @@
+# 管理番号生成ルール例
+serial:
+  prefix: "TR"
+  digits: 4
+  start: 301
+  random_suffix:
+    charset: "ABCDE"
+    length: 1
+
+# 出力・バックアップ設定例
+output_excel: "output/CustList.xlsx"
+output_csv: "output/CustList_{date}.csv"
+bak_dir: "bak"
+logs_dir: "logs"

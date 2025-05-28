@@ -1,0 +1,6 @@
+bak/
+logs/
+output/
+*.pyc
+__pycache__/
+.env
