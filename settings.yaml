@@ -1,14 +1,42 @@
-# 管理番号生成ルール例
+columns:
+  addr:
+  - 登録住所
+  - 住所
+  addr_id:
+  - 本人確認登録時住所
+  - 本人住所
+  email:
+  - メールアドレス
+  - メール アドレス
+  - Email
+  - E-mail
+  name:
+  - 氏名
+  - 名前
+  tel:
+  - 電話番号
+  - TEL
+  - Phone
+  url:
+  - 閲覧用URL
+  - URL
+csv:
+  encoding: utf-8-sig
+excel:
+  font_name: メイリオ
+paths:
+  bak_dir: bak
+  csv_pattern: output/CustList_{yyyymmdd}.csv
+  logs_dir: logs
+  output_excel: output/CustList.xlsx
 serial:
-  prefix: "TR"
   digits: 4
-  start: 301
+  prefix: TR
   random_suffix:
-    charset: "ABCDE"
+    charset: ABCDE
     length: 1
-
-# 出力・バックアップ設定例
-output_excel: "output/CustList.xlsx"
-output_csv: "output/CustList_{date}.csv"
-bak_dir: "bak"
-logs_dir: "logs"
+  start: 301
+title_keywords:
+- 【
+- ■
+- ◆
