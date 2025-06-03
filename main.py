@@ -10,11 +10,13 @@ from core import transform
 def main():
     logger = setup_logger()
     if len(sys.argv) < 2:
-        print("使い方: python main.py <input_excel_path>")
+        print("使い方: python main.py <input_excel_path> [--overwrite]")
         sys.exit(1)
 
     xls_path = Path(sys.argv[1])
+    overwrite = "--overwrite" in sys.argv
     logger.info(f"入力ファイル: {xls_path}")
+    logger.info(f"強制上書きモード: {'ON' if overwrite else 'OFF'}")
 
     raw = load_input_excel(xls_path, logger)
     if raw.empty:
@@ -25,7 +27,7 @@ def main():
     used_serials = set(old_map.values())
     serial_gen = SerialGenerator(CFG["serial"], used_serials)
     df_new = transform(raw, serial_gen, old_map)
-    append_and_save(df_new, serial_gen, logger)
+    append_and_save(df_new, serial_gen, logger, overwrite=overwrite)
     update_serial_start(serial_gen)
     logger.info("=== 完了 ===")
 
