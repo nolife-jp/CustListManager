@@ -127,6 +127,8 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None):
             df_person[col] = ""
     df_person = df_person[col_order]
     try:
+        # 出力先ディレクトリが無ければ作成
+        out_xlsx.parent.mkdir(parents=True, exist_ok=True)
         df_person.to_excel(out_xlsx, index=False)
     except PermissionError:
         if logger:
@@ -139,6 +141,8 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None):
     csv_name = CFG["paths"]["csv_pattern"].replace(
         "{yyyymmdd}", dt.datetime.today().strftime("%Y%m%d_%H%M")
     )
+    # CSV出力先ディレクトリも無ければ作成
+    Path(csv_name).parent.mkdir(parents=True, exist_ok=True)
     df_csv.to_csv(csv_name, index=False, encoding=CFG["csv"]["encoding"])
     if logger:
         logger.info(f"追記完了：{len(df_person)} 人 / {len(df_csv)} URL")
