@@ -2,7 +2,11 @@
 bak/
 logs/
 output/
+tests/
+
+# Test Files
 *.xlsx
+*.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -154,6 +158,3 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-
-# Test Files
-.xlsx
