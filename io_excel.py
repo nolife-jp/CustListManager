@@ -154,3 +154,5 @@ def load_person_map(logger=None) -> dict[str, str]:
     df = pd.read_excel(p, engine="openpyxl", dtype=str).fillna("").astype(str)
     df["key"] = df["氏名"].astype(str) + "|" + df["メールアドレス"].astype(str)
     return dict(zip(df["key"], df["管理番号"].astype(str)))
+
+
