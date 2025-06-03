@@ -35,7 +35,8 @@ serial:
   random_suffix:
     charset: ABCDE
     length: 1
-  start: 301
+  start: 628
+
 title_keywords:
 - 【
 - ■
