@@ -96,7 +96,10 @@ def load_input_excel(path: Path, logger=None) -> pd.DataFrame:
             print(f"[DEBUG] シート名: {sheet}")
         ts = extract_tables_multi(df, logger)
         tables.extend(ts)
-    return pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
+    df_all = pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
+    # ---- ここで入力順を付与 ----
+    df_all["_入力順"] = range(len(df_all))
+    return df_all
 
 def style_excel(path: Path, font_name: str):
     wb = load_workbook(path)
@@ -122,6 +125,9 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
 
     if "閲覧用URL" not in df_new.columns:
         df_new["閲覧用URL"] = ""
+    # ---- _入力順 が無ければここで付与（追加パッチ）----
+    if "_入力順" not in df_new.columns:
+        df_new["_入力順"] = range(len(df_new))
 
     # ★ 原始データ（ffill済）での人×URL件数を出力
     if logger:
@@ -155,11 +161,21 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
         "本人確認登録郵便番号": "first",
         "本人確認登録時住所": "first",
         "請求公演名": "first",
-        "備考": "first"
+        "備考": "first",
+        "_入力順": "first"  # これが重要!!
     }
     df_person = df_new.groupby(key_cols, as_index=False).agg(agg_dict)
     df_person = pd.merge(df_person, urlset_df[[*key_cols, "件数"]], on=key_cols, how="left")
     df_person["件数"] = df_person["件数"].fillna(0).astype(int)
+
+    # ---- ここで入力順でソート ----
+    df_person = df_person.sort_values("_入力順").reset_index(drop=True)
+
+    # 管理番号を採番（現行通り）
+    for i, row in df_person.iterrows():
+        # 既存管理番号が空欄なら新規採番
+        if not row.get("管理番号") or str(row["管理番号"]).strip() == "":
+            df_person.at[i, "管理番号"] = serial_gen.get_serial(row["氏名"], row["メールアドレス"])
 
     if logger:
         logger.info("==== [Excel書き出し直前: 個人ユニーク] ====")

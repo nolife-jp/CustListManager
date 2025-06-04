@@ -33,9 +33,9 @@ serial:
   digits: 4
   prefix: TR
   random_suffix:
-    charset: ABCDE
+    charset: ABCDEF
     length: 1
-  start: 1500
+  start: 1214
 title_keywords:
 - 【
 - ■
