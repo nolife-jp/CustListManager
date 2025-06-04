@@ -118,11 +118,14 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
     bak_dir  = Path(CFG["paths"]["bak_dir"])
     bak_dir.mkdir(parents=True, exist_ok=True)
     ts = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
+    if out_xlsx.exists():
+        shutil.copy2(out_xlsx, bak_dir / f"bak_{out_xlsx.stem}_{ts}.xlsx")
 
     key_cols = ["氏名", "メールアドレス"]
 
     if "閲覧用URL" not in df_new.columns:
         df_new["閲覧用URL"] = ""
+    # ---- _入力順 が無ければここで付与（追加パッチ）----
     if "_入力順" not in df_new.columns:
         df_new["_入力順"] = range(len(df_new))
 
@@ -170,6 +173,7 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
 
     # 管理番号を採番（現行通り）
     for i, row in df_person.iterrows():
+        # 既存管理番号が空欄なら新規採番
         if not row.get("管理番号") or str(row["管理番号"]).strip() == "":
             df_person.at[i, "管理番号"] = serial_gen.get_serial(row["氏名"], row["メールアドレス"])
 
@@ -202,24 +206,16 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
             if logger:
                 logger.error(f"既存Excelの読み込みに失敗しました: {e}")
 
-    # ====== 一時ファイルパスの決定 ======
-    tmp_xlsx = out_xlsx.with_name(out_xlsx.stem + "_tmp.xlsx")
-
-    # ===== 一時ファイルに出力 =====
     try:
         out_xlsx.parent.mkdir(parents=True, exist_ok=True)
-        df_person.to_excel(tmp_xlsx, index=False)
-        style_excel(tmp_xlsx, CFG["excel"]["font_name"])
+        df_person.to_excel(out_xlsx, index=False)
     except PermissionError:
         if logger:
             logger.error("CustList.xlsx を開いているため書き込めません。閉じてから再実行してください。")
         return
-    except Exception as e:
-        if logger:
-            logger.error(f"Excel一時ファイルの書き出しに失敗しました。元ファイルは壊れていません。: {e}")
-        return
+    style_excel(out_xlsx, CFG["excel"]["font_name"])
 
-    # ===== CSV一時ファイルの作成 =====
+    # ===== CSV出力用 DataFrame作成 =====
     if "管理番号" not in df_new.columns:
         df_new["管理番号"] = ""
     person_to_no = dict(zip(
@@ -227,28 +223,31 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
         df_person["管理番号"]
     ))
     df_new["管理番号"] = df_new.apply(lambda row: person_to_no.get((row["氏名"], row["メールアドレス"]), ""), axis=1)
+    # 不要なカラム除去
+    csv_col_order = [
+        "管理番号", "氏名", "メールアドレス", "電話番号", "郵便番号",
+        "登録住所", "本人確認登録郵便番号", "本人確認登録時住所",
+        "請求公演名", "備考", "閲覧用URL"
+    ]
+    for col in csv_col_order:
+        if col not in df_new.columns:
+            df_new[col] = ""
+    csv_df = df_new[csv_col_order]
+
+    # ファイル名例：CustList_2025-06-04_2020.csv
     csv_name = CFG["paths"]["csv_pattern"].replace(
-        "{yyyymmdd}", dt.datetime.today().strftime("%Y%m%d_%H%M")
+        "{yyyymmdd}", dt.datetime.today().strftime("%Y-%m-%d_%H%M")
     )
     Path(csv_name).parent.mkdir(parents=True, exist_ok=True)
-    df_new = clean_dataframe(df_new).astype(str)
+    csv_df = clean_dataframe(csv_df).astype(str)
     tmp_csv_name = Path(csv_name).with_name(Path(csv_name).stem + "_tmp.csv")
     try:
-        df_new.to_csv(tmp_csv_name, index=False, encoding=CFG["csv"]["encoding"])
+        csv_df.to_csv(tmp_csv_name, index=False, encoding=CFG["csv"]["encoding"])
+        # 正常終了時のみリネーム
+        tmp_csv_name.rename(csv_name)
     except Exception as e:
         if logger:
             logger.error(f"CSV一時ファイルの書き出しに失敗しました。元ファイルは壊れていません。: {e}")
-        return
-
-    # ====== 一時ファイル→本ファイルへリネーム（replace） ======
-    try:
-        if out_xlsx.exists():
-            shutil.copy2(out_xlsx, bak_dir / f"bak_{out_xlsx.stem}_{ts}.xlsx")
-        tmp_xlsx.replace(out_xlsx)
-        tmp_csv_name.replace(csv_name)
-    except Exception as e:
-        if logger:
-            logger.error(f"本ファイルへのリネームに失敗しました。: {e}")
         return
 
     if logger:
