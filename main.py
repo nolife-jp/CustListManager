@@ -8,21 +8,24 @@ from serial import SerialGenerator
 from core import transform
 
 def main():
-    logger = setup_logger()
+    # ログレベルDEBUGで標準出力に出す
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        handlers=[logging.StreamHandler()]
+    )
+    logger = logging.getLogger()
     if len(sys.argv) < 2:
         print("使い方: python main.py <input_excel_path> [--overwrite]")
         sys.exit(1)
-
     xls_path = Path(sys.argv[1])
     overwrite = "--overwrite" in sys.argv
     logger.info(f"入力ファイル: {xls_path}")
     logger.info(f"強制上書きモード: {'ON' if overwrite else 'OFF'}")
-
     raw = load_input_excel(xls_path, logger)
     if raw.empty:
         logger.warning("取り込めるデータがありません。")
         return
-
     old_map = load_person_map(logger)
     used_serials = set(old_map.values())
     serial_gen = SerialGenerator(CFG["serial"], used_serials)
@@ -33,5 +36,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

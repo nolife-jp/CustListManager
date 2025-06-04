@@ -6,6 +6,8 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Border
 
+import cleaning
+
 from settings import CFG
 
 def find_col(df: pd.DataFrame, cand: list[str]) -> str | None:
@@ -14,6 +16,14 @@ def find_col(df: pd.DataFrame, cand: list[str]) -> str | None:
             return c
     return None
 
+def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        df = df.applymap(cleaning.clean_basic)
+        df.columns = [cleaning.clean_basic(str(c)) for c in df.columns]
+        return df
+
 def extract_tables(df: pd.DataFrame) -> pd.DataFrame:
     from settings import CFG
     COL_MAP = CFG["columns"]
@@ -21,6 +31,11 @@ def extract_tables(df: pd.DataFrame) -> pd.DataFrame:
     # 1. 空行・空列の除去
     df = df.dropna(axis=0, how='all').dropna(axis=1, how='all')
     df = df.reset_index(drop=True)
+
+    print("==== [DEBUG] 1行目（カラム名） ====")
+    print(list(df.columns))
+    print("==== [DEBUG] DataFrame先頭5行 ====")
+    print(df.head())
 
     blocks = []
     cur_title = ""
@@ -35,17 +50,21 @@ def extract_tables(df: pd.DataFrame) -> pd.DataFrame:
             and row.isnull().sum() >= len(row) - 1
         ):
             cur_title = a_val
+            print(f"  -> タイトル認定: {cur_title!r}")
             continue
         if a_val == "No.":
-            cur_header = row
+            # ヘッダー行をクリーニングして配列化
+            cur_header = [cleaning.clean_basic(str(cell)) for cell in row.values]
+            print(f"  -> ヘッダー認定: {cur_header}")
             continue
         if cur_header is not None and a_val != "" and a_val != "以上" and not isinstance(a_val, float):
-            data_row = row.copy()
-            data_row.index = cur_header
+            # dict化＋クリーニング
+            data_row = dict(zip(cur_header, [cleaning.clean_basic(v) for v in row.values]))
             data_row["請求公演名"] = cur_title
             blocks.append(data_row)
 
     if not blocks:
+        print("==== [DEBUG] blocksが空です ====")
         return pd.DataFrame()
     out_df = pd.DataFrame(blocks)
     for col in ["請求公演名", "備考"]:
@@ -64,11 +83,17 @@ def extract_tables(df: pd.DataFrame) -> pd.DataFrame:
         if col not in out_df.columns:
             out_df[col] = ""
     out_df = out_df.drop_duplicates(subset=key_cols, keep='first').reset_index(drop=True)
+    out_df = clean_dataframe(out_df)
+    print("==== [DEBUG] 抽出後カラム名 ====")
+    print(list(out_df.columns))
+    print("==== [DEBUG] 抽出後先頭5行 ====")
+    print(out_df.head())
     return out_df
 
 def load_input_excel(path: Path, logger=None) -> pd.DataFrame:
     tables = []
     for sheet, df in pd.read_excel(path, sheet_name=None, header=None, engine="openpyxl").items():
+        print(f"[DEBUG] シート名: {sheet}")
         t = extract_tables(df)
         if not t.empty:
             if logger: logger.info(f"  シート『{sheet}』から {len(t)} 行取り込み")
@@ -84,7 +109,6 @@ def style_excel(path: Path, font_name: str):
             for c in row:
                 c.font = ft
                 c.border = nob
-                # すべて文字列書式にしたい場合
                 c.number_format = "@"
     wb.save(path)
 
@@ -95,7 +119,6 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
     ts = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
     if out_xlsx.exists():
         shutil.copy2(out_xlsx, bak_dir / f"bak_{out_xlsx.stem}_{ts}.xlsx")
-    # Excel
     df_person = (
         df_new.drop(columns=["閲覧用URL"])
         .drop_duplicates(subset=["氏名", "メールアドレス"])
@@ -110,21 +133,16 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
         if col not in df_person.columns:
             df_person[col] = ""
     df_person = df_person[col_order]
-
-    # すべてのカラムを文字列型へ
-    df_person = df_person.astype(str)
-
-    # 既存ファイルがあれば全カラム文字列で読み込み、マージ
+    df_person = clean_dataframe(df_person).astype(str)
     if out_xlsx.exists() and not overwrite:
         try:
             df_existing = pd.read_excel(out_xlsx, engine="openpyxl", dtype=str)
-            df_existing = df_existing.fillna("").astype(str)
+            df_existing = clean_dataframe(df_existing).fillna("").astype(str)
             df_person = pd.concat([df_existing, df_person], ignore_index=True)
             df_person = df_person.drop_duplicates(subset=["氏名", "メールアドレス"], keep='first')
         except Exception as e:
             if logger:
                 logger.error(f"既存Excelの読み込みに失敗しました: {e}")
-
     try:
         out_xlsx.parent.mkdir(parents=True, exist_ok=True)
         df_person.to_excel(out_xlsx, index=False)
@@ -133,14 +151,13 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
             logger.error("CustList.xlsx を開いているため書き込めません。閉じてから再実行してください。")
         return
     style_excel(out_xlsx, CFG["excel"]["font_name"])
-
-    # CSVは毎回新規出力のみ
     df_csv = df_new.drop(columns=["件数"]) if "件数" in df_new.columns else df_new
     df_csv = df_csv[df_csv["閲覧用URL"].notna() & (df_csv["閲覧用URL"] != "")]
     csv_name = CFG["paths"]["csv_pattern"].replace(
         "{yyyymmdd}", dt.datetime.today().strftime("%Y%m%d_%H%M")
     )
     Path(csv_name).parent.mkdir(parents=True, exist_ok=True)
+    df_csv = clean_dataframe(df_csv).astype(str)
     df_csv.to_csv(csv_name, index=False, encoding=CFG["csv"]["encoding"])
     if logger:
         logger.info(f"追記完了：{len(df_person)} 人 / {len(df_csv)} URL")
@@ -152,7 +169,6 @@ def load_person_map(logger=None) -> dict[str, str]:
     if not p.exists():
         return {}
     df = pd.read_excel(p, engine="openpyxl", dtype=str).fillna("").astype(str)
+    df = clean_dataframe(df)
     df["key"] = df["氏名"].astype(str) + "|" + df["メールアドレス"].astype(str)
     return dict(zip(df["key"], df["管理番号"].astype(str)))
-
-
