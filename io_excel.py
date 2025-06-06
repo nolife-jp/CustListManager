@@ -9,7 +9,6 @@ import cleaning
 from settings import CFG
 
 def clean_colname(name):
-    """カラム名もクリーニング（clean_basic + strip/tabs/newline除去）"""
     return cleaning.clean_basic(str(name)).replace('\t', '').replace('\n', '').replace('\r', '').strip()
 
 def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -21,12 +20,10 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
 def extract_tables_multi(df: pd.DataFrame, logger=None):
-    # 複数テーブル抽出用
     tables = []
     idx = 0
     nrows = df.shape[0]
     while idx < nrows:
-        # タイトル行（「【」で始まるものを想定）を探す
         title_row = None
         for i in range(idx, nrows):
             row = df.iloc[i].astype(str).tolist()
@@ -34,8 +31,7 @@ def extract_tables_multi(df: pd.DataFrame, logger=None):
                 title_row = i
                 break
         if title_row is None:
-            break  # 残りにタイトルがなければ終了
-        # ヘッダー行（No.がある行）を探す
+            break
         header_row = None
         for i in range(title_row + 1, nrows):
             row = df.iloc[i].astype(str).tolist()
@@ -44,31 +40,23 @@ def extract_tables_multi(df: pd.DataFrame, logger=None):
                 break
         if header_row is None:
             idx = title_row + 1
-            continue  # 次を探す
-        # データ部分（次の空行または次のタイトル行まで）
+            continue
         data_start = header_row + 1
         data_end = nrows
         for i in range(data_start, nrows):
             row = df.iloc[i].astype(str).tolist()
-            # 空行またはタイトル行でデータ終了
             if all(cell == "" or cell.lower() == "nan" for cell in row) or any(cell.strip().startswith("【") for cell in row):
                 data_end = i
                 break
-        # カラム名クリーニング
         headers = [clean_colname(h) for h in df.iloc[header_row]]
-        # データ部を抽出
         df_data = df.iloc[data_start:data_end].reset_index(drop=True)
         df_data.columns = headers
-        # ffill（前方補完）で結合セルの値を全行に展開
         df_data = df_data.ffill()
-        # 請求公演名を付与
         title = next(cell.strip() for cell in df.iloc[title_row] if isinstance(cell, str) and cell.strip().startswith("【"))
         df_data["請求公演名"] = title
-        # 必須カラムチェック
         must_have = ["氏名", "メールアドレス", "閲覧用URL"]
         if all(col in df_data.columns for col in must_have):
             df_data = clean_dataframe(df_data)
-            # 空欄行を除外
             for col in ["氏名", "メールアドレス"]:
                 df_data = df_data[~df_data[col].isin([col, "", None, pd.NA])]
             df_data = df_data[
@@ -77,8 +65,7 @@ def extract_tables_multi(df: pd.DataFrame, logger=None):
                 (df_data["閲覧用URL"].astype(str).str.strip() != "")
             ]
             tables.append(df_data)
-        idx = data_end + 1  # 次のタイトル以降へ進む
-    # ログ
+        idx = data_end + 1
     if logger:
         logger.info(f"[extract_tables_multi] 抽出テーブル数: {len(tables)}")
         for i, t in enumerate(tables):
@@ -96,7 +83,6 @@ def load_input_excel(path: Path, logger=None) -> pd.DataFrame:
         ts = extract_tables_multi(df, logger)
         tables.extend(ts)
     df_all = pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
-    # ---- ここで入力順を付与 ----
     df_all["_入力順"] = range(len(df_all))
     return df_all
 
@@ -113,7 +99,6 @@ def style_excel(path: Path, font_name: str):
     wb.save(path)
 
 def remove_internal_duplicates(df_new):
-    # "履歴" カラム名で実装
     if "_入力順" not in df_new.columns:
         df_new["_入力順"] = range(len(df_new))
     if "履歴" not in df_new.columns:
@@ -128,18 +113,13 @@ def remove_internal_duplicates(df_new):
         url = row[url_col]
         urlkey = key + (url,)
         if urlkey in seen:
-            # 完全一致（同一人物・同一公演・同一URL）はスキップ
-            continue
+            continue  # 完全一致はスキップ
         seen.add(urlkey)
         rows.append(row)
-    # DataFrameに戻す
     df_person = pd.DataFrame(rows).reset_index(drop=True)
-    # 件数・請求公演名は後段で再度集約されるためここではそのまま
     return df_person
 
 def merge_with_existing(df_person, df_existing, today_str):
-    # 既存エクセルとのマージロジック
-    # ここでは別ファイルの場合の要件に合わせてマージする
     if "履歴" not in df_person.columns:
         df_person["履歴"] = ""
     if "履歴" not in df_existing.columns:
@@ -158,12 +138,10 @@ def merge_with_existing(df_person, df_existing, today_str):
             (df_existing[pub_col] == row[pub_col])
         ]
         if not hit.empty:
-            # 完全一致（人物＋公演）があれば履歴カラムを付与してそのまま追加
             row = row.copy()
             row["履歴"] = f"{today_str}:過去に同一人物、公演のレコード有り"
             appended_rows.append(row)
         else:
-            # 別公演名の場合は既存レコードに件数カウントアップ＆公演名追記
             exist = df_existing[
                 (df_existing["氏名"] == row["氏名"]) &
                 (df_existing["メールアドレス"] == row["メールアドレス"])
@@ -177,7 +155,6 @@ def merge_with_existing(df_person, df_existing, today_str):
                 df_existing.at[i, "件数"] = prev_count + int(row.get("件数", 1))
             else:
                 appended_rows.append(row)
-    # 新規追加分をDataFrameで
     if appended_rows:
         appended_df = pd.DataFrame(appended_rows)[all_cols]
         df_existing = pd.concat([df_existing, appended_df], ignore_index=True)
@@ -192,13 +169,12 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
     if out_xlsx.exists():
         shutil.copy2(out_xlsx, bak_dir / f"bak_{out_xlsx.stem}_{ts}.xlsx")
 
-    # 必須カラムを保証
     if "_入力順" not in df_new.columns:
         df_new["_入力順"] = range(len(df_new))
     if "履歴" not in df_new.columns:
         df_new["履歴"] = ""
 
-    # まず同一ファイル内重複を除去
+    # 同一ファイル内重複を除去
     df_person = remove_internal_duplicates(df_new)
     key_cols = ["氏名", "メールアドレス"]
     urlset_df = (
@@ -209,7 +185,14 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
     )
     urlset_df["件数"] = urlset_df["閲覧用URL"].apply(len)
 
-    # 集約
+    # ★★修正：請求公演名は | 連結で集約★★
+    def agg_titles(x):
+        titles = [str(v) for v in x if pd.notnull(v) and str(v).strip() != ""]
+        # 重複を除きつつ順序維持
+        seen = set()
+        uniq_titles = [t for t in titles if not (t in seen or seen.add(t))]
+        return "|".join(uniq_titles)
+
     agg_dict = {
         "管理番号": "first",
         "電話番号": "first",
@@ -217,7 +200,7 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
         "登録住所": "first",
         "本人確認登録郵便番号": "first",
         "本人確認登録時住所": "first",
-        "請求公演名": "first",
+        "請求公演名": agg_titles,
         "備考": "first",
         "_入力順": "first",
         "履歴": "first"
@@ -227,12 +210,10 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
     df_person_agg["件数"] = df_person_agg["件数"].fillna(0).astype(int)
     df_person_agg = df_person_agg.sort_values("_入力順").reset_index(drop=True)
 
-    # 管理番号付与
     for i, row in df_person_agg.iterrows():
         if not row.get("管理番号") or str(row["管理番号"]).strip() == "":
             df_person_agg.at[i, "管理番号"] = serial_gen.get_serial(row["氏名"], row["メールアドレス"])
 
-    # 既存Excelとのマージ
     if out_xlsx.exists() and not overwrite:
         try:
             df_existing = pd.read_excel(out_xlsx, engine="openpyxl", dtype=str)
@@ -242,7 +223,6 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
             if logger:
                 logger.error(f"既存Excelの読み込みに失敗しました: {e}")
 
-    # 必要カラム埋め
     col_order = [
         "管理番号", "氏名", "メールアドレス", "電話番号", "郵便番号",
         "登録住所", "本人確認登録郵便番号", "本人確認登録時住所",
@@ -254,19 +234,17 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
     df_person_agg = df_person_agg[col_order]
     df_person_agg = clean_dataframe(df_person_agg).astype(str)
 
-    # 一時ファイル経由で書き込み
     tmp_xlsx = out_xlsx.with_name(out_xlsx.stem + "_tmp.xlsx")
     try:
         out_xlsx.parent.mkdir(parents=True, exist_ok=True)
         df_person_agg.to_excel(tmp_xlsx, index=False)
-        tmp_xlsx.replace(out_xlsx)  # replace で上書き（renameより安全）
+        tmp_xlsx.replace(out_xlsx)
         style_excel(out_xlsx, CFG["excel"]["font_name"])
     except PermissionError:
         if logger:
             logger.error("CustList.xlsx を開いているため書き込めません。閉じてから再実行してください。")
         return
 
-    # ===== CSV出力用 DataFrame作成 =====
     if "管理番号" not in df_new.columns:
         df_new["管理番号"] = ""
     person_to_no = dict(zip(
@@ -284,7 +262,6 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
             df_new[col] = ""
     csv_df = df_new[csv_col_order]
 
-    # ファイル名例：CustList_2025-06-04_2020.csv
     csv_name = CFG["paths"]["csv_pattern"].replace(
         "{yyyymmdd}", dt.datetime.today().strftime("%Y-%m-%d_%H%M")
     )
