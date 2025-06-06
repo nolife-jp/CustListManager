@@ -1,7 +1,6 @@
 import datetime as dt
 import shutil
 from pathlib import Path
-
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Border
@@ -113,46 +112,104 @@ def style_excel(path: Path, font_name: str):
                 c.number_format = "@"
     wb.save(path)
 
+def remove_internal_duplicates(df_new):
+    # "履歴" カラム名で実装
+    if "_入力順" not in df_new.columns:
+        df_new["_入力順"] = range(len(df_new))
+    if "履歴" not in df_new.columns:
+        df_new["履歴"] = ""
+
+    key_cols = ["氏名", "メールアドレス", "請求公演名"]
+    url_col = "閲覧用URL"
+    rows = []
+    seen = set()
+    for i, row in df_new.iterrows():
+        key = (row["氏名"], row["メールアドレス"], row["請求公演名"])
+        url = row[url_col]
+        urlkey = key + (url,)
+        if urlkey in seen:
+            # 完全一致（同一人物・同一公演・同一URL）はスキップ
+            continue
+        seen.add(urlkey)
+        rows.append(row)
+    # DataFrameに戻す
+    df_person = pd.DataFrame(rows).reset_index(drop=True)
+    # 件数・請求公演名は後段で再度集約されるためここではそのまま
+    return df_person
+
+def merge_with_existing(df_person, df_existing, today_str):
+    # 既存エクセルとのマージロジック
+    # ここでは別ファイルの場合の要件に合わせてマージする
+    if "履歴" not in df_person.columns:
+        df_person["履歴"] = ""
+    if "履歴" not in df_existing.columns:
+        df_existing["履歴"] = ""
+
+    key_cols = ["氏名", "メールアドレス"]
+    pub_col = "請求公演名"
+    all_cols = list(df_person.columns)
+    appended_rows = []
+    for _, row in df_person.iterrows():
+        key = (row["氏名"], row["メールアドレス"])
+        # 完全一致（人物＋公演）が既存に存在するか
+        hit = df_existing[
+            (df_existing["氏名"] == row["氏名"]) &
+            (df_existing["メールアドレス"] == row["メールアドレス"]) &
+            (df_existing[pub_col] == row[pub_col])
+        ]
+        if not hit.empty:
+            # 完全一致（人物＋公演）があれば履歴カラムを付与してそのまま追加
+            row = row.copy()
+            row["履歴"] = f"{today_str}:過去に同一人物、公演のレコード有り"
+            appended_rows.append(row)
+        else:
+            # 別公演名の場合は既存レコードに件数カウントアップ＆公演名追記
+            exist = df_existing[
+                (df_existing["氏名"] == row["氏名"]) &
+                (df_existing["メールアドレス"] == row["メールアドレス"])
+            ]
+            if not exist.empty:
+                i = exist.index[0]
+                prev_titles = str(df_existing.at[i, pub_col])
+                new_titles = prev_titles + "|" + row[pub_col] if prev_titles else row[pub_col]
+                prev_count = int(df_existing.at[i, "件数"]) if "件数" in df_existing.columns and str(df_existing.at[i, "件数"]).isdigit() else 0
+                df_existing.at[i, pub_col] = new_titles
+                df_existing.at[i, "件数"] = prev_count + int(row.get("件数", 1))
+            else:
+                appended_rows.append(row)
+    # 新規追加分をDataFrameで
+    if appended_rows:
+        appended_df = pd.DataFrame(appended_rows)[all_cols]
+        df_existing = pd.concat([df_existing, appended_df], ignore_index=True)
+    return df_existing
+
 def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=False):
     out_xlsx = Path(CFG["paths"]["output_excel"])
     bak_dir  = Path(CFG["paths"]["bak_dir"])
     bak_dir.mkdir(parents=True, exist_ok=True)
     ts = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
+    today_str = dt.datetime.now().strftime("%Y-%m-%d")
     if out_xlsx.exists():
         shutil.copy2(out_xlsx, bak_dir / f"bak_{out_xlsx.stem}_{ts}.xlsx")
 
-    key_cols = ["氏名", "メールアドレス"]
-
-    if "閲覧用URL" not in df_new.columns:
-        df_new["閲覧用URL"] = ""
-    # ---- _入力順 が無ければここで付与（追加パッチ）----
+    # 必須カラムを保証
     if "_入力順" not in df_new.columns:
         df_new["_入力順"] = range(len(df_new))
+    if "履歴" not in df_new.columns:
+        df_new["履歴"] = ""
 
-    # ★ 原始データ（ffill済）での人×URL件数を出力
-    if logger:
-        logger.info(f"==== [原始データ:人×URL] レコード数: {len(df_new)} ====")
-        logger.info(df_new[[*key_cols, "閲覧用URL"]].head(30))
-    else:
-        print(f"==== [原始データ:人×URL] レコード数: {len(df_new)} ====")
-        print(df_new[[*key_cols, "閲覧用URL"]].head(30))
-
-    # 1. 「人」ごとのユニークなURLセット
+    # まず同一ファイル内重複を除去
+    df_person = remove_internal_duplicates(df_new)
+    key_cols = ["氏名", "メールアドレス"]
     urlset_df = (
-        df_new
+        df_person
         .groupby(key_cols)["閲覧用URL"]
         .apply(lambda x: set([v for v in x if pd.notnull(v) and str(v).strip() != ""]))
         .reset_index()
     )
     urlset_df["件数"] = urlset_df["閲覧用URL"].apply(len)
-    if logger:
-        logger.info("==== [groupbyでユニークURLカウント後] ====")
-        logger.info(urlset_df.head(30))
-    else:
-        print("==== [groupbyでユニークURLカウント後] ====")
-        print(urlset_df.head(30))
 
-    # 2. 各「人」の代表情報抽出
+    # 集約
     agg_dict = {
         "管理番号": "first",
         "電話番号": "first",
@@ -162,68 +219,61 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
         "本人確認登録時住所": "first",
         "請求公演名": "first",
         "備考": "first",
-        "_入力順": "first"  # これが重要!!
+        "_入力順": "first",
+        "履歴": "first"
     }
-    df_person = df_new.groupby(key_cols, as_index=False).agg(agg_dict)
-    df_person = pd.merge(df_person, urlset_df[[*key_cols, "件数"]], on=key_cols, how="left")
-    df_person["件数"] = df_person["件数"].fillna(0).astype(int)
+    df_person_agg = df_person.groupby(key_cols, as_index=False).agg(agg_dict)
+    df_person_agg = pd.merge(df_person_agg, urlset_df[[*key_cols, "件数"]], on=key_cols, how="left")
+    df_person_agg["件数"] = df_person_agg["件数"].fillna(0).astype(int)
+    df_person_agg = df_person_agg.sort_values("_入力順").reset_index(drop=True)
 
-    # ---- ここで入力順でソート ----
-    df_person = df_person.sort_values("_入力順").reset_index(drop=True)
-
-    # 管理番号を採番（現行通り）
-    for i, row in df_person.iterrows():
-        # 既存管理番号が空欄なら新規採番
+    # 管理番号付与
+    for i, row in df_person_agg.iterrows():
         if not row.get("管理番号") or str(row["管理番号"]).strip() == "":
-            df_person.at[i, "管理番号"] = serial_gen.get_serial(row["氏名"], row["メールアドレス"])
-
-    if logger:
-        logger.info("==== [Excel書き出し直前: 個人ユニーク] ====")
-        logger.info(df_person[["氏名", "メールアドレス", "件数"]].head(30))
-    else:
-        print("==== [Excel書き出し直前: 個人ユニーク] ====")
-        print(df_person[["氏名", "メールアドレス", "件数"]].head(30))
-
-    col_order = [
-        "管理番号", "氏名", "メールアドレス", "電話番号", "郵便番号",
-        "登録住所", "本人確認登録郵便番号", "本人確認登録時住所",
-        "請求公演名", "件数", "備考"
-    ]
-    for col in col_order:
-        if col not in df_person.columns:
-            df_person[col] = ""
-    df_person = df_person[col_order]
-    df_person = clean_dataframe(df_person).astype(str)
+            df_person_agg.at[i, "管理番号"] = serial_gen.get_serial(row["氏名"], row["メールアドレス"])
 
     # 既存Excelとのマージ
     if out_xlsx.exists() and not overwrite:
         try:
             df_existing = pd.read_excel(out_xlsx, engine="openpyxl", dtype=str)
             df_existing = clean_dataframe(df_existing).fillna("").astype(str)
-            df_person = pd.concat([df_existing, df_person], ignore_index=True)
-            df_person = df_person.drop_duplicates(subset=["氏名", "メールアドレス"], keep='first')
+            df_person_agg = merge_with_existing(df_person_agg, df_existing, today_str)
         except Exception as e:
             if logger:
                 logger.error(f"既存Excelの読み込みに失敗しました: {e}")
 
+    # 必要カラム埋め
+    col_order = [
+        "管理番号", "氏名", "メールアドレス", "電話番号", "郵便番号",
+        "登録住所", "本人確認登録郵便番号", "本人確認登録時住所",
+        "請求公演名", "件数", "備考", "履歴"
+    ]
+    for col in col_order:
+        if col not in df_person_agg.columns:
+            df_person_agg[col] = ""
+    df_person_agg = df_person_agg[col_order]
+    df_person_agg = clean_dataframe(df_person_agg).astype(str)
+
+    # 一時ファイル経由で書き込み
+    tmp_xlsx = out_xlsx.with_name(out_xlsx.stem + "_tmp.xlsx")
     try:
         out_xlsx.parent.mkdir(parents=True, exist_ok=True)
-        df_person.to_excel(out_xlsx, index=False)
+        df_person_agg.to_excel(tmp_xlsx, index=False)
+        tmp_xlsx.replace(out_xlsx)  # replace で上書き（renameより安全）
+        style_excel(out_xlsx, CFG["excel"]["font_name"])
     except PermissionError:
         if logger:
             logger.error("CustList.xlsx を開いているため書き込めません。閉じてから再実行してください。")
         return
-    style_excel(out_xlsx, CFG["excel"]["font_name"])
 
     # ===== CSV出力用 DataFrame作成 =====
     if "管理番号" not in df_new.columns:
         df_new["管理番号"] = ""
     person_to_no = dict(zip(
-        zip(df_person["氏名"], df_person["メールアドレス"]),
-        df_person["管理番号"]
+        zip(df_person_agg["氏名"], df_person_agg["メールアドレス"]),
+        df_person_agg["管理番号"]
     ))
     df_new["管理番号"] = df_new.apply(lambda row: person_to_no.get((row["氏名"], row["メールアドレス"]), ""), axis=1)
-    # 不要なカラム除去
     csv_col_order = [
         "管理番号", "氏名", "メールアドレス", "電話番号", "郵便番号",
         "登録住所", "本人確認登録郵便番号", "本人確認登録時住所",
@@ -243,15 +293,14 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
     tmp_csv_name = Path(csv_name).with_name(Path(csv_name).stem + "_tmp.csv")
     try:
         csv_df.to_csv(tmp_csv_name, index=False, encoding=CFG["csv"]["encoding"])
-        # 正常終了時のみリネーム
-        tmp_csv_name.rename(csv_name)
+        tmp_csv_name.replace(csv_name)
     except Exception as e:
         if logger:
             logger.error(f"CSV一時ファイルの書き出しに失敗しました。元ファイルは壊れていません。: {e}")
         return
 
     if logger:
-        logger.info(f"追記完了：{len(df_person)} 人 / {len(df_new)} URL")
+        logger.info(f"追記完了：{len(df_person_agg)} 人 / {len(df_new)} URL")
         logger.info(f"Excel 保存: {out_xlsx}")
         logger.info(f"CSV 出力 : {csv_name}")
 

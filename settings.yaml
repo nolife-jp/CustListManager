@@ -29,13 +29,14 @@ paths:
   csv_pattern: output/CustList_{yyyymmdd}.csv
   logs_dir: logs
   output_excel: output/CustList.xlsx
+  tmp_dir: tmp
 serial:
   digits: 4
   prefix: TR
   random_suffix:
     charset: ABCDEF
     length: 1
-  start: 1746
+  start: 1256
 title_keywords:
 - 【
 - ■
