@@ -158,3 +158,18 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# VSCodeの設定
+.vscode/
+
+# OSごみ
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# yamlテンプレート（バックアップや一時書き換え）
+*.yaml~
+*.yml~
+
+# tmpディレクトリ（mainプロセスで使う場合）
+tmp/

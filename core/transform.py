@@ -1,23 +1,9 @@
-import re
+"""
+DataFrameカラム名の正規化、マッピング、件数集計など
+"""
 import pandas as pd
-
-ZIP_RE = re.compile(r"〒?\s*(\d{3})[-‐−]?(\d{4})")
-
-def clean_address(text: str) -> tuple[str, str]:
-    if not isinstance(text, str):
-        return "", ""
-    txt = text.replace("\r", "").replace("\n", " ").strip()
-    m = ZIP_RE.search(txt)
-    zipcode = f"〒{m.group(1)}-{m.group(2)}" if m else ""
-    if m:
-        txt = ZIP_RE.sub("", txt).strip()
-    return zipcode, txt
-
-def fix_tel(num: str) -> str:
-    t = str(num).strip().replace("-", "")
-    if t and t.isdigit() and not t.startswith("0") and len(t) in (10, 11):
-        return "0" + t
-    return t
+from config.settings import CFG
+from utils.cleaning import clean_address, fix_tel, clean_colname
 
 def find_col(df: pd.DataFrame, cand: list[str]) -> str | None:
     for c in cand:
@@ -26,7 +12,6 @@ def find_col(df: pd.DataFrame, cand: list[str]) -> str | None:
     return None
 
 def transform(raw: pd.DataFrame, serial_gen, old_map: dict[str, str]) -> pd.DataFrame:
-    from settings import CFG
     COL_MAP = CFG["columns"]
     c_url  = find_col(raw, COL_MAP["url"])
     c_name = find_col(raw, COL_MAP["name"])
@@ -41,7 +26,6 @@ def transform(raw: pd.DataFrame, serial_gen, old_map: dict[str, str]) -> pd.Data
     person_serial = old_map.copy()
     rows = []
     for _, r in raw.iterrows():
-        # URL必須行のみ処理
         url_val = str(r[c_url]).strip() if c_url else ""
         if not url_val: continue
 

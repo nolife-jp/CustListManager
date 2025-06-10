@@ -1,3 +1,6 @@
+"""
+Excel/CSVファイルの入出力、テーブル抽出、バックアップ、スタイリング
+"""
 import datetime as dt
 import shutil
 from pathlib import Path
@@ -6,30 +9,17 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Border
 
-import cleaning
-from settings import CFG
+from utils.cleaning import clean_colname, clean_dataframe
+from config.settings import CFG
 
-from dedupe_internal import dedupe_internal
-from dedupe_external import dedupe_external
-
-def clean_colname(name):
-    """カラム名もクリーニング（clean_basic + strip/tabs/newline除去）"""
-    return cleaning.clean_basic(str(name)).replace('\t', '').replace('\n', '').replace('\r', '').strip()
-
-def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    import warnings
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", FutureWarning)
-        df = df.applymap(cleaning.clean_basic)
-        df.columns = [clean_colname(c) for c in df.columns]
-        return df
+from core.dedupe_internal import dedupe_internal
+from core.dedupe_external import dedupe_external
 
 def extract_tables_multi(df: pd.DataFrame, logger=None):
     tables = []
     idx = 0
     nrows = df.shape[0]
     while idx < nrows:
-        # タイトル行（「【」で始まるものを想定）を探す
         title_row = None
         for i in range(idx, nrows):
             row = df.iloc[i].astype(str).tolist()
@@ -37,8 +27,7 @@ def extract_tables_multi(df: pd.DataFrame, logger=None):
                 title_row = i
                 break
         if title_row is None:
-            break  # 残りにタイトルがなければ終了
-        # ヘッダー行（No.がある行）を探す
+            break
         header_row = None
         for i in range(title_row + 1, nrows):
             row = df.iloc[i].astype(str).tolist()
@@ -47,31 +36,23 @@ def extract_tables_multi(df: pd.DataFrame, logger=None):
                 break
         if header_row is None:
             idx = title_row + 1
-            continue  # 次を探す
-        # データ部分（次の空行または次のタイトル行まで）
+            continue
         data_start = header_row + 1
         data_end = nrows
         for i in range(data_start, nrows):
             row = df.iloc[i].astype(str).tolist()
-            # 空行またはタイトル行でデータ終了
             if all(cell == "" or cell.lower() == "nan" for cell in row) or any(cell.strip().startswith("【") for cell in row):
                 data_end = i
                 break
-        # カラム名クリーニング
         headers = [clean_colname(h) for h in df.iloc[header_row]]
-        # データ部を抽出
         df_data = df.iloc[data_start:data_end].reset_index(drop=True)
         df_data.columns = headers
-        # ffill（前方補完）で結合セルの値を全行に展開
         df_data = df_data.ffill()
-        # 請求公演名を付与
         title = next(cell.strip() for cell in df.iloc[title_row] if isinstance(cell, str) and cell.strip().startswith("【"))
         df_data["請求公演名"] = title
-        # 必須カラムチェック
         must_have = ["氏名", "メールアドレス", "閲覧用URL"]
         if all(col in df_data.columns for col in must_have):
             df_data = clean_dataframe(df_data)
-            # 空欄行を除外
             for col in ["氏名", "メールアドレス"]:
                 df_data = df_data[~df_data[col].isin([col, "", None, pd.NA])]
             df_data = df_data[
@@ -80,8 +61,7 @@ def extract_tables_multi(df: pd.DataFrame, logger=None):
                 (df_data["閲覧用URL"].astype(str).str.strip() != "")
             ]
             tables.append(df_data)
-        idx = data_end + 1  # 次のタイトル以降へ進む
-    # ログ
+        idx = data_end + 1
     if logger:
         logger.info(f"[extract_tables_multi] 抽出テーブル数: {len(tables)}")
         for i, t in enumerate(tables):
@@ -99,7 +79,6 @@ def load_input_excel(path: Path, logger=None) -> pd.DataFrame:
         ts = extract_tables_multi(df, logger)
         tables.extend(ts)
     df_all = pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
-    # ---- ここで入力順を付与 ----
     df_all["_入力順"] = range(len(df_all))
     return df_all
 
@@ -133,10 +112,8 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
     if "履歴" not in df_new.columns:
         df_new["履歴"] = ""
 
-    # ===== 1. 同一ファイル内重複処理 =====
     df_person = dedupe_internal(df_new)
 
-    # ===== 2. 既存Excelとの突合・履歴・件数追記処理 =====
     if out_xlsx.exists() and not overwrite:
         try:
             df_existing = pd.read_excel(out_xlsx, engine="openpyxl", dtype=str)
@@ -146,12 +123,10 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
             if logger:
                 logger.error(f"既存Excelの読み込みに失敗しました: {e}")
 
-    # ===== 3. 管理番号採番 =====
     for i, row in df_person.iterrows():
         if not row.get("管理番号") or str(row["管理番号"]).strip() == "":
             df_person.at[i, "管理番号"] = serial_gen.get_serial(row["氏名"], row["メールアドレス"])
 
-    # ===== 4. 必要カラム埋め =====
     col_order = [
         "管理番号", "氏名", "メールアドレス", "電話番号", "郵便番号",
         "登録住所", "本人確認登録郵便番号", "本人確認登録時住所",
@@ -163,7 +138,6 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
     df_person = df_person[col_order]
     df_person = clean_dataframe(df_person).astype(str)
 
-    # ===== 5. エクセル書き込み =====
     tmp_xlsx = out_xlsx.with_name(out_xlsx.stem + "_tmp.xlsx")
     try:
         out_xlsx.parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +149,6 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
             logger.error("CustList.xlsx を開いているため書き込めません。閉じてから再実行してください。")
         return
 
-    # ===== 6. CSV出力用 DataFrame作成 =====
     if "管理番号" not in df_new.columns:
         df_new["管理番号"] = ""
     person_to_no = dict(zip(
@@ -186,7 +159,6 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
         lambda row: person_to_no.get((row["氏名"], row["メールアドレス"], row["請求公演名"]), ""),
         axis=1
     )
-    # 不要なカラム除去
     csv_col_order = [
         "管理番号", "氏名", "メールアドレス", "電話番号", "郵便番号",
         "登録住所", "本人確認登録郵便番号", "本人確認登録時住所",
@@ -197,7 +169,6 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
             df_new[col] = ""
     csv_df = df_new[csv_col_order]
 
-    # ファイル名例：CustList_2025-06-04_2020.csv
     csv_name = CFG["paths"]["csv_pattern"].replace(
         "{yyyymmdd}", dt.datetime.today().strftime("%Y-%m-%d_%H%M")
     )

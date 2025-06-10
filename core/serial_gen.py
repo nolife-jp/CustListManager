@@ -1,3 +1,6 @@
+"""
+管理番号発行（SerialGeneratorクラス）
+"""
 import random
 
 class SerialGenerator:
@@ -19,3 +22,7 @@ class SerialGenerator:
             if serial not in self.used:
                 self.used.add(serial)
                 return serial
+
+    def get_serial(self, name, mail):
+        # nameとmailから決定的なserialを返したい場合はここに実装
+        return self.next()

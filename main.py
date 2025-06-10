@@ -1,14 +1,17 @@
+"""
+エントリーポイント
+コマンドライン引数でExcelファイル指定→処理全体フロー起動
+"""
 from pathlib import Path
 import sys
 import logging
 
-from settings import CFG, setup_logger, update_serial_start
-from io_excel import load_input_excel, style_excel, append_and_save, load_person_map
-from serial import SerialGenerator
-from core import transform
+from config.settings import CFG, setup_logger, update_serial_start
+from core.excel_io import load_input_excel, style_excel, append_and_save, load_person_map
+from core.serial_gen import SerialGenerator
+from core.transform import transform
 
 def main():
-    # ログレベルDEBUGで標準出力に出す
     logging.basicConfig(
         level=logging.DEBUG,
         format='%(asctime)s [%(levelname)s] %(message)s',

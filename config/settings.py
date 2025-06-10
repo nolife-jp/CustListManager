@@ -1,3 +1,6 @@
+"""
+設定ファイル（settings.yaml）読込、ロガー初期化、シリアル番号更新など
+"""
 import yaml
 import datetime as dt
 from pathlib import Path
