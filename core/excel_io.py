@@ -1,6 +1,3 @@
-"""
-Excel/CSVファイルの入出力、テーブル抽出、バックアップ、スタイリング
-"""
 import datetime as dt
 import shutil
 from pathlib import Path
@@ -9,11 +6,22 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Border
 
-from utils.cleaning import clean_colname, clean_dataframe
+from core import cleaning
 from config.settings import CFG
 
 from core.dedupe_internal import dedupe_internal
 from core.dedupe_external import dedupe_external
+
+def clean_colname(name):
+    return cleaning.clean_basic(str(name)).replace('\t', '').replace('\n', '').replace('\r', '').strip()
+
+def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        df = df.applymap(cleaning.clean_basic)
+        df.columns = [clean_colname(c) for c in df.columns]
+        return df
 
 def extract_tables_multi(df: pd.DataFrame, logger=None):
     tables = []
@@ -112,13 +120,13 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
     if "履歴" not in df_new.columns:
         df_new["履歴"] = ""
 
-    df_person = dedupe_internal(df_new)
+    df_person = dedupe_internal(df_new, logger=logger)
 
     if out_xlsx.exists() and not overwrite:
         try:
             df_existing = pd.read_excel(out_xlsx, engine="openpyxl", dtype=str)
             df_existing = clean_dataframe(df_existing).fillna("").astype(str)
-            df_person = dedupe_external(df_person, df_existing, today_str)
+            df_person = dedupe_external(df_person, df_existing, today_str, logger=logger)
         except Exception as e:
             if logger:
                 logger.error(f"既存Excelの読み込みに失敗しました: {e}")

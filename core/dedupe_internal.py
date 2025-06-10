@@ -1,19 +1,13 @@
-"""
-同一ファイル内での重複排除・件数集計
-"""
 import pandas as pd
 
-def dedupe_internal(df: pd.DataFrame):
-    """
-    同一ファイル（1回実行時）内での重複判定＆集約
-    """
+def dedupe_internal(df: pd.DataFrame, logger=None):
     key_cols = ["氏名", "メールアドレス"]
     event_col = "請求公演名"
     url_col = "閲覧用URL"
     
     seen_records = set()
-    summary = {}  # (氏名, メール, 公演名) → {件数, 公演名(順序保持), 他カラム}
-    order = []  # 入力順にkeyを記録
+    summary = {}
+    order = []
 
     for idx, row in df.iterrows():
         key = (row["氏名"], row["メールアドレス"], row["請求公演名"])
@@ -48,10 +42,11 @@ def dedupe_internal(df: pd.DataFrame):
     for val in person_event_map.values():
         r = val["row"]
         r["請求公演名"] = "|".join(val["event_list"])
-        r["件数"] = str(val["件数"])  # ここでstr化
+        r["件数"] = str(val["件数"])
         output_rows.append(r)
     df_out = pd.DataFrame(output_rows)
-    # 念のためstr型で再変換（冗長だが確実）
     if "件数" in df_out.columns:
         df_out["件数"] = df_out["件数"].astype(str)
+    if logger:
+        logger.debug(f"[dedupe_internal] {len(df)}→{len(df_out)}人")
     return df_out
