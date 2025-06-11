@@ -1,6 +1,8 @@
-import argparse
-from pathlib import Path
 import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent))
+
+import argparse
 
 from config.settings import setup_logger, CFG, update_serial_start
 from core.excel_io import load_input_excel, style_excel, append_and_save, load_person_map

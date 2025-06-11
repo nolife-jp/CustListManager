@@ -8,7 +8,6 @@ from openpyxl.styles import Font, Border
 
 from core import cleaning
 from config.settings import CFG
-
 from core.dedupe_internal import dedupe_internal
 from core.dedupe_external import dedupe_external
 
@@ -82,8 +81,6 @@ def load_input_excel(path: Path, logger=None) -> pd.DataFrame:
     for sheet, df in xls.items():
         if logger:
             logger.info(f"[DEBUG] シート名: {sheet}")
-        else:
-            print(f"[DEBUG] シート名: {sheet}")
         ts = extract_tables_multi(df, logger)
         tables.extend(ts)
     df_all = pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
@@ -91,6 +88,7 @@ def load_input_excel(path: Path, logger=None) -> pd.DataFrame:
     return df_all
 
 def style_excel(path: Path, font_name: str):
+    """エクセルファイル内の全セルのフォント名を指定（例: メイリオ）"""
     wb = load_workbook(path)
     ft = Font(name=font_name)
     nob = Border()
@@ -151,6 +149,7 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
         out_xlsx.parent.mkdir(parents=True, exist_ok=True)
         df_person.to_excel(tmp_xlsx, index=False)
         tmp_xlsx.replace(out_xlsx)
+        # === ここでyaml指定のフォントを必ず適用 ===
         style_excel(out_xlsx, CFG["excel"]["font_name"])
     except PermissionError:
         if logger:
