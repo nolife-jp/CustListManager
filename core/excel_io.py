@@ -6,7 +6,7 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Border
 
-from core import cleaning
+import utils.cleaning as cleaning
 from config.settings import CFG
 from core.dedupe_internal import dedupe_internal
 from core.dedupe_external import dedupe_external
@@ -149,7 +149,6 @@ def append_and_save(df_new: pd.DataFrame, serial_gen, logger=None, overwrite=Fal
         out_xlsx.parent.mkdir(parents=True, exist_ok=True)
         df_person.to_excel(tmp_xlsx, index=False)
         tmp_xlsx.replace(out_xlsx)
-        # === ここでyaml指定のフォントを必ず適用 ===
         style_excel(out_xlsx, CFG["excel"]["font_name"])
     except PermissionError:
         if logger:
